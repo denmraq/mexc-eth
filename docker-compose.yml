@@ -1,0 +1,11 @@
+services:
+  trader:
+    build: .
+    container_name: mexc-eth-trader
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8080:8080"
