@@ -9,7 +9,7 @@ class MexcFutures:
         self.api_key=api_key or ""; self.secret_key=secret_key or ""
         self.base=base.rstrip("/"); self.timeout=timeout
         self.s=requests.Session()
-        self.s.headers.update({"User-Agent":"MEXC-ETH-TRADER-V1/1.0"})
+        self.s.headers.update({"User-Agent":"MEXC-ETH-TRADER-V1/1.1.1"})
 
     def _check(self,r):
         r.raise_for_status(); p=r.json()
@@ -62,10 +62,65 @@ class MexcFutures:
         return self.public_get(f"/api/v1/contract/kline/{symbol}",{"interval":interval,"start":start,"end":end})
 
     def depth(self,symbol,limit=20):
-        return self.public_get(f"/api/v1/contract/depth/{symbol}",{"limit":limit})
+        """Return normalized order book rows as [price, volume].
 
-    def deals(self,symbol):
-        return self.public_get(f"/api/v1/contract/deals/{symbol}")
+        MEXC depth rows are [price, volume, order_count].  Strategy code must
+        use contract volume (index 1), not order count (index 2).
+        """
+        data = self.public_get(f"/api/v1/contract/depth/{symbol}", {"limit":limit})
+        if not isinstance(data, dict):
+            return {"bids": [], "asks": []}
+
+        def norm(rows):
+            out = []
+            for row in rows or []:
+                try:
+                    if isinstance(row, (list, tuple)) and len(row) >= 2:
+                        out.append([float(row[0]), float(row[1])])
+                    elif isinstance(row, dict):
+                        price = row.get("price", row.get("p"))
+                        vol = row.get("vol", row.get("v", row.get("quantity")))
+                        if price is not None and vol is not None:
+                            out.append([float(price), float(vol)])
+                except (TypeError, ValueError):
+                    continue
+            return out[:limit]
+
+        return {
+            "bids": norm(data.get("bids")),
+            "asks": norm(data.get("asks")),
+            "version": data.get("version"),
+            "timestamp": data.get("timestamp"),
+        }
+
+    def deals(self,symbol,limit=100):
+        """Return normalized trades using price/vol/side keys.
+
+        MEXC public deals use compact fields p, v, T where T=1 is purchase
+        and T=2 is sell.  Normalize them for the strategy tape parser.
+        """
+        data = self.public_get(f"/api/v1/contract/deals/{symbol}", {"limit":limit})
+        if isinstance(data, dict):
+            data = data.get("data") or data.get("deals") or []
+        out = []
+        for row in data or []:
+            if not isinstance(row, dict):
+                continue
+            try:
+                price = row.get("price", row.get("p"))
+                vol = row.get("vol", row.get("v"))
+                side = row.get("side", row.get("T"))
+                if price is None or vol is None or side is None:
+                    continue
+                out.append({
+                    "price": float(price),
+                    "vol": float(vol),
+                    "side": side,
+                    "timestamp": row.get("timestamp", row.get("t")),
+                })
+            except (TypeError, ValueError):
+                continue
+        return out[:limit]
 
     def positions(self,symbol=None):
         data=self.private_get("/api/v1/private/position/open_positions")
