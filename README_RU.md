@@ -1,57 +1,31 @@
-# MEXC ETH TRADER V1
+# MEXC ETH TRADER V1.1
 
-Автономный ETH_USDT futures-бот для VPS.
+V1.1 — диагностическая версия стратегии без изменения весов V1.0.
 
-## Архитектура
-- официальный MEXC Futures API через `https://api.mexc.com`
-- постоянный worker 24/7, браузер не нужен
-- 5m + 15m тренд, EMA20/50, RSI, ATR, breakout+volume
-- order-book imbalance + recent trade tape как ограниченная microstructure часть
-- Risk Engine: риск на сделку, дневной kill-switch, лимит сделок, серия убытков, cooldown
-- SQLite журнал на VPS
-- Docker `restart: unless-stopped`
-- PAPER по умолчанию
-- LIVE закрыт двойным предохранителем
+## Что добавлено
+- Полная расшифровка score: EMA 5m/15m, RSI, momentum 5m/15m, breakout+volume, order book, tape.
+- Видны raw LONG/SHORT, коэффициент согласия 5m/15m, edge и weak-edge cap.
+- Новая SQLite-таблица `decisions`: бот сохраняет каждое решение раз в тик.
+- Для каждого отказа от входа сохраняется причина: `OPEN_POSITION`, `DAILY_TRADE_LIMIT`, `DAILY_LOSS_LIMIT`, `LOSS_STREAK_LIMIT`, `COOLDOWN`, `ATR_FILTER`, `SCORE_BELOW_72`, `ENTERED`.
+- Сделка связывается с конкретным decision snapshot через `decision_id`.
+- Dashboard показывает текущую расшифровку и последние 10 решений.
+- Совместимость со старой V1.0 базой: миграция выполняется автоматически, старые сделки сохраняются.
+- Добавлена совместимость со старыми именами переменных `.env`, которые могли быть введены вручную.
 
-## Первый запуск
-1. Создай новый GitHub repo.
-2. Загрузи содержимое ZIP в корень.
-3. На VPS:
+## Обновление с V1.0
+Заменить файлы:
+- `app.py`
+- `bot/strategy.py`
+- `bot/storage.py`
+- `bot/engine.py`
+- `.env.example` (рабочий `.env` не трогать)
+
+После обновления:
 ```bash
-apt update
-apt install -y git docker.io docker-compose-v2
-systemctl enable --now docker
-git clone YOUR_REPO_URL mexc-eth-trader
-cd mexc-eth-trader
-cp .env.example .env
-nano .env
+cd /root/mexc-eth
+git pull
 docker compose up -d --build
-docker compose logs -f --tail=100
+docker compose logs --tail=50
 ```
 
-Панель: `http://IP_СЕРВЕРА:8080`
-
-Сразу поменять `DASHBOARD_PASSWORD`.
-
-## MEXC API
-Для первого PAPER запуска ключи не нужны.
-Перед LIVE:
-- KYC
-- Futures trading permission
-- IP whitelist = IPv4 VPS
-- без Withdrawal permission
-- ключи только в `.env`, не в GitHub
-
-## LIVE
-Не включать до PAPER проверки.
-
-Нужно одновременно:
-```env
-TRADING_MODE=LIVE
-ENABLE_LIVE_TRADING=YES_I_UNDERSTAND
-LIVE_CONFIRMATION=I_ACCEPT_REAL_MONEY_RISK
-```
-
-## Важное
-PAPER учитывает 0.10% round-trip taker fee как базовую модель комиссии.
-Перед реальной торговлей нужно проверить контрактный размер MEXC, фактический SL/TP и комиссии на минимальном размере.
+Режим PAPER сохраняется. LIVE не включать до проверки журнала решений.
