@@ -6,7 +6,9 @@
 // upcoming macro/exchange events, and — per their AI Strategy release —
 // a social/sentiment signal. We substitute a public sentiment proxy
 // (alternative.me Fear & Greed Index) since MEXC's own social-listening
-// pipeline isn't accessible from a static page.
+// pipeline isn't accessible from a static page. The calendar itself is
+// real (Forex Factory's public weekly feed, High/Medium impact only) —
+// not MEXC's own event feed, but genuine upcoming macro events.
 //
 // The propagation step (simulateCurrentState) is intentionally the SAME
 // function used by the tunnel engine — the interesting methodological
@@ -59,24 +61,37 @@ async function fearGreedScore() {
   } catch { return { raw: 50, score: 0 }; }
 }
 
-// Recurring UTC-time "events" that behave like the calendar strip in the
-// screenshot (US cash-market open/close). No free, reliably CORS-enabled
-// macro calendar exists for a static page without an API key — add one
-// here later (e.g. a keyed provider) if you want real NFP/CPI/FOMC entries.
-function upcomingEvents(nowMs, hoursAhead = 48) {
-  const events = [];
-  const dayMs = 86400000;
-  const base = new Date(nowMs);
-  for (let d = 0; d <= 2; d++) {
-    const day = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate() + d));
-    const open = new Date(day); open.setUTCHours(13, 30, 0, 0);   // ~09:30 ET
-    const close = new Date(day); close.setUTCHours(20, 0, 0, 0);  // ~16:00 ET
-    events.push({ t: open.getTime(), title: 'Открытие рынка США', note: 'Волатильность может вырасти на открытии' });
-    events.push({ t: close.getTime(), title: 'Закрытие рынка США', note: 'Волатильность может вырасти на закрытии' });
+// Real macro calendar: Forex Factory's public weekly JSON feed (no key,
+// CORS-enabled, widely used by client-side calendar widgets and MT4/5 EAs).
+// Rate-limited by the source to ~2 requests/5min per URL, so the raw feed
+// is cached in localStorage for 30 minutes regardless of how often the
+// page polls for a price update.
+const FF_CALENDAR_URL = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
+async function fetchCalendarRaw() {
+  const cache = Store.get('ff_calendar_cache', null);
+  const now = Date.now();
+  if (cache && (now - cache.fetchedAt) < 30 * 60000) return cache.data;
+  try {
+    const raw = await getJSON(FF_CALENDAR_URL);
+    Store.set('ff_calendar_cache', { fetchedAt: now, data: raw });
+    return raw;
+  } catch {
+    return cache ? cache.data : [];
   }
-  return events
-    .filter(e => e.t >= nowMs && e.t <= nowMs + hoursAhead * 3600000)
-    .sort((a, b) => a.t - b.t);
+}
+async function upcomingEvents(nowMs, hoursAhead = 48, maxItems = 4) {
+  const raw = await fetchCalendarRaw();
+  return raw
+    .filter(e => e.impact === 'High' || e.impact === 'Medium')
+    .map(e => ({
+      t: new Date(e.date).getTime(),
+      title: `${e.country || ''} ${e.title || ''}`.trim(),
+      note: [e.forecast ? `прогноз ${e.forecast}` : null, e.previous ? `пред. ${e.previous}` : null].filter(Boolean).join(' · '),
+      impact: e.impact,
+    }))
+    .filter(e => Number.isFinite(e.t) && e.t >= nowMs && e.t <= nowMs + hoursAhead * 3600000)
+    .sort((a, b) => a.t - b.t)
+    .slice(0, maxItems);
 }
 function calendarRiskScore(events, nowMs) {
   let risk = 0;
@@ -120,7 +135,7 @@ async function buildMexcStyleEstimate() {
   const mean = weighted;
   const disagreement = Math.sqrt(ensemble.reduce((s, v) => s + (v - mean) ** 2, 0) / ensemble.length);
 
-  const events = upcomingEvents(Date.now());
+  const events = await upcomingEvents(Date.now());
   const criticality = calendarRiskScore(events, Date.now());
   const rv1h = realizedVol1h(closes15);
   const seed = hashSeed('mexcstyle-' + cycle);
