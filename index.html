@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ETH: APT tunnel vs MEXC-style estimate</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#080b12;color:#e9eef7;font:15px -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif}
+main{max-width:820px;margin:auto;padding:24px}
+h1{font-size:22px}.muted{color:#8e9bad;line-height:1.5}
+.card{display:block;background:#101622;border:1px solid #202b3b;border-radius:16px;padding:20px;margin-top:16px;text-decoration:none;color:inherit}
+.card:hover{border-color:#3a5a8a}
+.tag{display:inline-block;font-size:11px;padding:3px 8px;border-radius:999px;background:#192334;color:#8e9bad;margin-bottom:8px}
+.card h2{margin:0 0 6px;font-size:18px}
+.warn{background:#241a0c;border:1px solid #4a3312;color:#e8c98a;border-radius:12px;padding:10px 12px;font-size:12.5px;margin-top:18px}
+</style>
+</head>
+<body><main>
+<h1>ETH: два подхода к прогнозу цены</h1>
+<p class="muted">Оба движка работают полностью на клиенте (без бэкенда) — данные берутся напрямую из публичного Binance API прямо из браузера, точно так же, как в вашем ETH Radar. Разверните эту папку через GitHub Pages, и обе страницы работают сами по себе.</p>
+
+<a class="card" href="tunnel/">
+<span class="tag">ВАШ ПРОЕКТ</span>
+<h2>Adaptive Probability Tunnel</h2>
+<p class="muted">JS-порт вашего v0.8 (physics_engine.py + tunnel_engine.py): пять сил текущего состояния (spot/perp pressure, positioning, liquidity, BTC/ETHBTC driver) + LPPLS-критичность → Монте-Карло по SDE. Та же математика, тот же смысл p20–p80.</p>
+</a>
+
+<a class="card" href="mexc-style/">
+<span class="tag">РЕКОНСТРУКЦИЯ</span>
+<h2>MEXC Smart Chart — наша оценка</h2>
+<p class="muted">Не код MEXC (у них нет открытой спецификации). Наша попытка воссоздать похожий по форме индикатор из публично заявленных компонентов: TA-тренд (EMA/RSI/MACD), funding-позиционирование, Fear&amp;Greed как прокси сентимента, календарь открытия/закрытия рынка США. Прогоняется через тот же стохастический движок, что и туннель.</p>
+</a>
+
+<div class="warn">Ничего здесь не финансовый совет. Обе страницы — учебное/исследовательское сравнение методологий, не готовые торговые сигналы.</div>
+</main>
+</body></html>
