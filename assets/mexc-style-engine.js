@@ -111,53 +111,59 @@ async function buildMexcStyleEstimate() {
   ]);
   const cycle = String(d15[d15.length - 1].t);
   const livePrice = await livePricePerp(SYM);
-  const cached = Store.get('mexcstyle_forecast_' + cycle, null);
-  if (cached) {
-    cached.livePrice = livePrice;
-    cached.historyClosed15m = d15.slice(-96);
-    return cached;
+
+  // Only the "slow" inputs (TA on closed candles, funding, sentiment,
+  // calendar) are cached per 15m cycle — partly for stability, partly to
+  // respect the Forex Factory rate limit. The simulation itself is NOT
+  // cached: it always runs fresh off the current live price, so the chart
+  // and the "ETH LIVE" number on screen can never show two different
+  // prices at once, even if the price moved a lot mid-candle.
+  let factors = Store.get('mexcstyle_factors_' + cycle, null);
+  if (!factors) {
+    const funding = await fundingRate(SYM).catch(() => 0);
+    const fg = await fearGreedScore();
+    const closes15 = d15.map(c => c.c), closes1h = d1h.map(c => c.c), closes4h = d4h.map(c => c.c);
+
+    const trendCombined = clip(0.5 * trendScore(closes4h) + 0.3 * trendScore(closes1h) + 0.2 * trendScore(closes15));
+    const rsiScore = clip((rsi14(closes1h) - 50) / 30);
+    const macdScore = macdHistScore(closes1h);
+    const fundingScore = normalise(funding, 0.0005);
+    const sentimentScore = fg.score;
+
+    const ensemble = [trendCombined, rsiScore, macdScore, fundingScore, sentimentScore];
+    const weights = [0.35, 0.15, 0.15, 0.15, 0.20];
+    const weighted = ensemble.reduce((s, v, i) => s + v * weights[i], 0);
+    const force = Math.tanh(weighted / 0.5);
+    const disagreement = Math.sqrt(ensemble.reduce((s, v) => s + (v - weighted) ** 2, 0) / ensemble.length);
+
+    const events = await upcomingEvents(Date.now());
+    const criticality = calendarRiskScore(events, Date.now());
+    const rv1h = realizedVol1h(closes15);
+
+    factors = {
+      force, disagreement, criticality, rv1h, events,
+      display: { trend: trendCombined, rsi: rsiScore, macd: macdScore, funding: fundingScore, sentiment: sentimentScore, fgiRaw: fg.raw },
+    };
+    Store.set('mexcstyle_factors_' + cycle, factors);
   }
 
-  const funding = await fundingRate(SYM).catch(() => 0);
-  const fg = await fearGreedScore();
-  const closes15 = d15.map(c => c.c), closes1h = d1h.map(c => c.c), closes4h = d4h.map(c => c.c);
-
-  const trendCombined = clip(0.5 * trendScore(closes4h) + 0.3 * trendScore(closes1h) + 0.2 * trendScore(closes15));
-  const rsiScore = clip((rsi14(closes1h) - 50) / 30);
-  const macdScore = macdHistScore(closes1h);
-  const fundingScore = normalise(funding, 0.0005);
-  const sentimentScore = fg.score;
-
-  const ensemble = [trendCombined, rsiScore, macdScore, fundingScore, sentimentScore];
-  const weights = [0.35, 0.15, 0.15, 0.15, 0.20];
-  const weighted = ensemble.reduce((s, v, i) => s + v * weights[i], 0);
-  const force = Math.tanh(weighted / 0.5);
-  const mean = weighted;
-  const disagreement = Math.sqrt(ensemble.reduce((s, v) => s + (v - mean) ** 2, 0) / ensemble.length);
-
-  const events = await upcomingEvents(Date.now());
-  const criticality = calendarRiskScore(events, Date.now());
-  const rv1h = realizedVol1h(closes15);
-  const seed = hashSeed('mexcstyle-' + cycle);
-  const sim = simulateCurrentState(livePrice, rv1h, force, disagreement, criticality, { steps: 48, dt: 0.5, paths: 1500, seed });
+  const seed = hashSeed('mexcstyle-' + cycle + '-' + Math.round(livePrice * 100));
+  const sim = simulateCurrentState(livePrice, factors.rv1h, factors.force, factors.disagreement, factors.criticality, { steps: 48, dt: 0.5, paths: 1500, seed });
   const points = [{ minutes: 0, center: livePrice, low: livePrice, high: livePrice, pUp: 0.5, pDown: 0.5, expectedReturnPct: 0 }, ...sim];
   const pAt = h => points[h * 2];
   const p4 = pAt(4);
   const direction = p4.center >= livePrice ? 'LONG' : 'SHORT';
   const pUp24 = pAt(24).pUp;
 
-  const forecast = {
-    direction, originPrice: livePrice,
+  return {
+    direction, originPrice: livePrice, livePrice,
     longPct: Math.round(pUp24 * 100), shortPct: 100 - Math.round(pUp24 * 100),
     pUp7dLike: pUp24, // our sim horizon tops out at 24h; labelled honestly below
     targets: { '4h': p4.center, '12h': pAt(12).center, '24h': pAt(24).center },
     returnsPct: { '4h': p4.expectedReturnPct, '12h': pAt(12).expectedReturnPct, '24h': pAt(24).expectedReturnPct },
     directionProbability: { '4h': pAt(4), '12h': pAt(12), '24h': pAt(24) },
-    factors: { trend: trendCombined, rsi: rsiScore, macd: macdScore, funding: fundingScore, sentiment: sentimentScore, fgiRaw: fg.raw },
-    events, tunnel: points, cycle,
+    factors: factors.display,
+    events: factors.events, tunnel: points, cycle,
+    historyClosed15m: d15.slice(-96),
   };
-  Store.set('mexcstyle_forecast_' + cycle, forecast);
-  forecast.livePrice = livePrice;
-  forecast.historyClosed15m = d15.slice(-96);
-  return forecast;
 }
