@@ -65,7 +65,7 @@ function renderEvents(d) {
     return;
   }
   if (!d.events.length) {
-    evEl.innerHTML = `<div class="muted small">Нет high/medium-impact событий в ближайшие 48ч. ${CALENDAR_SCOPE_NOTE}</div>`;
+    evEl.innerHTML = `<div class="muted small">Нет high/medium-impact событий в ближайшие 72ч. ${CALENDAR_SCOPE_NOTE}</div>`;
     return;
   }
   for (const e of d.events) {
