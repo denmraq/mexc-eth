@@ -98,7 +98,7 @@ async function fetchCalendarRaw() {
     return { data: [], status: 'failed' };
   }
 }
-async function upcomingEvents(nowMs, hoursAhead = 48, maxItems = 4) {
+async function upcomingEvents(nowMs, hoursAhead = 72, maxItems = 6) {
   const { data: raw, status } = await fetchCalendarRaw();
   const events = raw
     .filter(e => e.impact === 'High' || e.impact === 'Medium')
