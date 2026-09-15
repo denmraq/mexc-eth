@@ -1,0 +1,47 @@
+name: Update FF calendar snapshot
+
+# Fetches Forex Factory's calendar SERVER-SIDE (GitHub Actions runner),
+# where CORS does not apply at all -- CORS is a browser-only restriction.
+# Writes the result to assets/calendar.json as a plain file in the repo,
+# which the site then reads as a same-origin static asset. This removes
+# the browser from ever talking to nfs.faireconomy.media directly, which
+# sidesteps both possible root causes we were chasing: a missing CORS
+# header on their end, and their ~2-requests/5min rate limit (this job
+# only runs a few times a day, from GitHub's infrastructure).
+on:
+  schedule:
+    - cron: '17 */3 * * *'   # every 3 hours, :17 to avoid the top-of-hour pile-up
+  workflow_dispatch: {}       # allows a manual "Run workflow" click for an immediate refresh
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch Forex Factory calendar
+        run: |
+          curl -sSL --fail \
+            -A "Mozilla/5.0 (compatible; eth-mexc-calendar-bot/1.0; +https://github.com/${{ github.repository }})" \
+            "https://nfs.faireconomy.media/ff_calendar_thisweek.json" \
+            -o assets/calendar.json
+
+      - name: Sanity-check payload (must be a real JSON array, not a rate-limit HTML page)
+        run: |
+          node -e "
+            const fs = require('fs');
+            const d = JSON.parse(fs.readFileSync('assets/calendar.json', 'utf8'));
+            if (!Array.isArray(d)) throw new Error('Payload is not an array -- likely an HTML rate-limit/error page, not real calendar data.');
+            console.log('OK: ' + d.length + ' events fetched.');
+          "
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add assets/calendar.json
+          git diff --cached --quiet || git commit -m "chore: update FF calendar snapshot [skip ci]"
+          git push
