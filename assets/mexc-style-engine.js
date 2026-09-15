@@ -61,35 +61,33 @@ async function fearGreedScore() {
   } catch { return { raw: 50, score: 0 }; }
 }
 
-// Real macro calendar: Forex Factory's public weekly JSON feed (no key,
-// CORS-enabled, widely used by client-side calendar widgets and MT4/5 EAs).
+// Real macro calendar, but NOT fetched directly from Forex Factory by the
+// browser anymore.
 //
-// BUGFIX 1 (2026-09-14): Forex Factory rate-limits this endpoint to ~2
-// requests/5min per client; when exceeded it returns an HTML "Request
-// Denied" page (frequently with a 200 status), which getJSON's r.json()
-// call turns into a thrown JSON-parse error. The old code caught that
-// and silently fell back to `[]` — indistinguishable from "genuinely no
-// events this week" in the UI.
-//   - Cache TTL raised from 30min to 6h.
-//   - fetchCalendarRaw() now returns a status ('ok' | 'stale_cache' |
-//     'failed') alongside the data, propagated through upcomingEvents()
-//     and the estimate object, so the UI can say "calendar unavailable"
-//     instead of implying a confirmed empty calendar.
+// BUGFIX 3 (2026-09-15): every earlier fix in this section (raising the
+// cache TTL, widening the lookahead window, adding a 20-minute retry
+// cooldown) assumed the failure was Forex Factory's documented
+// ~2-requests/5min rate limit. An hour of waiting with the cooldown fix
+// live did not change anything, which rules that out -- a real rate
+// limit would have recovered well within that hour. The far more likely
+// explanation: nfs.faireconomy.media is used almost exclusively by
+// non-browser clients (MT4/5 EAs via WebRequest, Python/Rust scrapers,
+// server-side scheduled jobs) -- none of which are affected by CORS,
+// because CORS is a browser-only restriction. There is no confirmed case
+// of it being fetched successfully from arbitrary-origin client-side JS.
+// If it simply doesn't send an Access-Control-Allow-Origin header, every
+// browser fetch() from this page fails immediately and permanently,
+// no matter how long you wait -- which matches what was actually observed.
 //
-// BUGFIX 2 (2026-09-14, later same day): fetch attempts were only gated by
-// the 15-minute price-candle cycle (one attempt per new candle, via the
-// `factors` cache in buildMexcStyleEstimate). During active testing/
-// reloading across many candle cycles in a short span, that's still enough
-// distinct attempts to blow through FF's 2-requests-per-5-minutes limit
-// repeatedly -- and each failure only stayed "remembered" for the rest of
-// that one 15-minute cycle, so the next cycle retried almost immediately,
-// often still inside FF's cooldown window, recreating the same failure
-// indefinitely. Now the last attempt time is tracked independently of the
-// price cycle, with its own 20-minute cooldown, so a known-failed fetch
-// actually backs off instead of retrying every ~15 minutes forever.
-const FF_CALENDAR_URL = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
-const FF_CACHE_TTL_MS = 6 * 3600000;
-const FF_RETRY_COOLDOWN_MS = 20 * 60000;
+// Fix: take the browser out of that conversation entirely. A scheduled
+// GitHub Action (.github/workflows/update-calendar.yml) fetches the
+// calendar SERVER-SIDE (where CORS does not apply) every 3 hours and
+// commits it to assets/calendar.json as a plain file in this repo. The
+// page below just fetches that file -- same-origin, so CORS is not even
+// a question, and it's a static GitHub Pages asset so there's no rate
+// limit to worry about on the read side either.
+const FF_SNAPSHOT_URL = '../assets/calendar.json';
+const FF_CACHE_TTL_MS = 60 * 60000; // 1h client cache; the Action itself only refreshes every 3h
 
 async function fetchCalendarRaw() {
   const cache = Store.get('ff_calendar_cache', null);
@@ -97,16 +95,9 @@ async function fetchCalendarRaw() {
   if (cache && Array.isArray(cache.data) && (now - cache.fetchedAt) < FF_CACHE_TTL_MS) {
     return { data: cache.data, status: 'ok' };
   }
-  const lastAttempt = Store.get('ff_calendar_last_attempt', 0);
-  if (now - lastAttempt < FF_RETRY_COOLDOWN_MS) {
-    return (cache && Array.isArray(cache.data))
-      ? { data: cache.data, status: 'stale_cache' }
-      : { data: [], status: 'failed' };
-  }
-  Store.set('ff_calendar_last_attempt', now);
   try {
-    const raw = await getJSON(FF_CALENDAR_URL);
-    if (!Array.isArray(raw)) throw new Error('unexpected calendar payload (likely rate-limited HTML response)');
+    const raw = await getJSON(FF_SNAPSHOT_URL);
+    if (!Array.isArray(raw)) throw new Error('unexpected calendar snapshot payload');
     Store.set('ff_calendar_cache', { fetchedAt: now, data: raw });
     return { data: raw, status: 'ok' };
   } catch {
@@ -150,10 +141,11 @@ async function buildMexcStyleEstimate() {
 
   // Only the "slow" inputs (TA on closed candles, funding, sentiment,
   // calendar) are cached per 15m cycle — partly for stability, partly to
-  // respect the Forex Factory rate limit. The simulation itself is NOT
-  // cached: it always runs fresh off the current live price, so the chart
-  // and the "ETH LIVE" number on screen can never show two different
-  // prices at once, even if the price moved a lot mid-candle.
+  // avoid re-reading the calendar snapshot on every 60s auto-refresh. The
+  // simulation itself is NOT cached: it always runs fresh off the current
+  // live price, so the chart and the "ETH LIVE" number on screen can never
+  // show two different prices at once, even if the price moved a lot
+  // mid-candle.
   let factors = Store.get('mexcstyle_factors_' + cycle, null);
   if (!factors) {
     const funding = await fundingRate(SYM).catch(() => 0);
