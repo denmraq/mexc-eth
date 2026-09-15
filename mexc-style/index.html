@@ -20,7 +20,7 @@ canvas{width:100%;height:420px;display:block}.row{display:flex;gap:10px;flex-wra
 </style>
 </head>
 <body><main>
-<div class="top"><div><h1>MEXC-style estimate (реконструкция)</h1><div class="muted">ETH · <a href="../">← сравнение</a></div></div><div id="stamp" class="muted"></div></div>
+<div class="top"><div><h1>MEXC-style estimate (реконструкция)</h1><div class="muted">ETH</div></div><div id="stamp" class="muted"></div></div>
 
 <div class="card"><div class="top"><div><div class="k">4H НАПРАВЛЕНИЕ</div><div id="dir" class="big">—</div></div><div><div class="k">ETH LIVE</div><div id="price" class="big">—</div></div></div>
 <div class="row" style="margin-top:12px"><span id="trend" class="pill">—</span><span id="rsi" class="pill">—</span><span id="macd" class="pill">—</span><span id="funding" class="pill">—</span><span id="sent" class="pill">—</span></div></div>
@@ -50,18 +50,19 @@ let last = null;
 const $ = id => document.getElementById(id);
 const fmt = x => (x >= 0 ? '+' : '') + x.toFixed(3);
 
-// Forex Factory covers macro releases only (rates, CPI, NFP, FOMC etc).
-// It does NOT cover crypto-specific news (regulation/bills, exchange
-// listings, token unlocks) -- so "no events" here is scoped to macro,
-// not a claim that nothing crypto-relevant is happening. Shown once,
-// only when the list is genuinely empty, so it doesn't clutter every load.
+// Calendar is now a same-origin static snapshot (assets/calendar.json),
+// refreshed server-side every 3h by a GitHub Action -- not fetched from
+// Forex Factory directly by the browser anymore, so CORS/rate-limit
+// failures shouldn't happen here at all. 'failed' now realistically only
+// means the snapshot file itself is momentarily unavailable (e.g. right
+// after a fresh deploy, before Pages has published it).
 const CALENDAR_SCOPE_NOTE = 'Только макро (ставки, CPI, NFP, FOMC) — крипто-новости (регуляция, листинги, анлоки) сюда не входят.';
 
 function renderEvents(d) {
   const evEl = $('events');
   evEl.innerHTML = '';
   if (d.calendarStatus && d.calendarStatus !== 'ok') {
-    evEl.innerHTML = `<div class="cal-warn">Календарь Forex Factory временно недоступен (лимит запросов источника) — список может быть неполным. Обновится само в течение часа.</div>`;
+    evEl.innerHTML = `<div class="cal-warn">Снимок календаря пока недоступен (обновляется раз в ~3ч на сервере) — список может быть неполным.</div>`;
     return;
   }
   if (!d.events.length) {
